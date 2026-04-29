@@ -126,7 +126,9 @@ function BillingBreakdown(props: {
   const { log, other, isAdmin } = props
   const isPerCall = isPerCallBilling(other.model_price)
   const isClaude = other.claude === true
+  const isTieredBilling = other.billing_mode === 'tiered_expr'
   const tieredSummary = getTieredBillingSummary(other)
+  const unresolvedTiered = isTieredBilling && !tieredSummary
 
   const rows: Array<{ label: string; value: string }> = []
   const priceOpts = { digitsLarge: 4, digitsSmall: 6, abbreviate: false }
@@ -150,6 +152,11 @@ function BillingBreakdown(props: {
         value: `${fmtPrice(entry.price)}/M`,
       })
     }
+  } else if (isTieredBilling) {
+    rows.push({
+      label: t('Billing Mode'),
+      value: t('Dynamic Pricing'),
+    })
   } else if (isPerCall) {
     rows.push({ label: t('Billing Mode'), value: t('Per-call') })
     if (other.model_price != null) {
@@ -174,113 +181,115 @@ function BillingBreakdown(props: {
     }
   }
 
-  const userGR = other.user_group_ratio
-  const isUserGR = userGR != null && Number.isFinite(userGR) && userGR !== -1
-  const effectiveGR = isUserGR ? userGR : other.group_ratio
-  if (effectiveGR != null && Number.isFinite(effectiveGR)) {
-    rows.push({
-      label: isUserGR ? t('User Exclusive Ratio') : t('Group Ratio'),
-      value: `${formatRatio(effectiveGR)}x`,
-    })
-  }
-
-  if (!tieredSummary && isClaude && hasAnyCacheTokens(other)) {
-    if (other.cache_ratio != null && other.cache_ratio !== 1) {
+  if (!unresolvedTiered) {
+    const userGR = other.user_group_ratio
+    const isUserGR = userGR != null && Number.isFinite(userGR) && userGR !== -1
+    const effectiveGR = isUserGR ? userGR : other.group_ratio
+    if (effectiveGR != null && Number.isFinite(effectiveGR)) {
       rows.push({
-        label: t('Cache Read'),
-        value: `${fmtPrice(baseInputUSD * other.cache_ratio)}/M`,
-      })
-    }
-    if (
-      other.cache_creation_ratio != null &&
-      other.cache_creation_ratio !== 1
-    ) {
-      rows.push({
-        label: t('Cache Creation'),
-        value: `${fmtPrice(baseInputUSD * other.cache_creation_ratio)}/M`,
-      })
-    }
-    if (
-      other.cache_creation_ratio_5m != null &&
-      other.cache_creation_ratio_5m !== 0
-    ) {
-      rows.push({
-        label: t('Cache Creation (5m)'),
-        value: `${fmtPrice(baseInputUSD * other.cache_creation_ratio_5m)}/M`,
-      })
-    }
-    if (
-      other.cache_creation_ratio_1h != null &&
-      other.cache_creation_ratio_1h !== 0
-    ) {
-      rows.push({
-        label: t('Cache Creation (1h)'),
-        value: `${fmtPrice(baseInputUSD * other.cache_creation_ratio_1h)}/M`,
-      })
-    }
-  }
-
-  if (!tieredSummary) {
-    if (other.audio_ratio != null && other.audio_ratio !== 1) {
-      rows.push({
-        label: t('Audio input'),
-        value: `${fmtPrice(baseInputUSD * other.audio_ratio)}/M`,
+        label: isUserGR ? t('User Exclusive Ratio') : t('Group Ratio'),
+        value: `${formatRatio(effectiveGR)}x`,
       })
     }
 
-    if (
-      other.audio_completion_ratio != null &&
-      other.audio_completion_ratio !== 1
-    ) {
+    if (!tieredSummary && isClaude && hasAnyCacheTokens(other)) {
+      if (other.cache_ratio != null && other.cache_ratio !== 1) {
+        rows.push({
+          label: t('Cache Read'),
+          value: `${fmtPrice(baseInputUSD * other.cache_ratio)}/M`,
+        })
+      }
+      if (
+        other.cache_creation_ratio != null &&
+        other.cache_creation_ratio !== 1
+      ) {
+        rows.push({
+          label: t('Cache Creation'),
+          value: `${fmtPrice(baseInputUSD * other.cache_creation_ratio)}/M`,
+        })
+      }
+      if (
+        other.cache_creation_ratio_5m != null &&
+        other.cache_creation_ratio_5m !== 0
+      ) {
+        rows.push({
+          label: t('Cache Creation (5m)'),
+          value: `${fmtPrice(baseInputUSD * other.cache_creation_ratio_5m)}/M`,
+        })
+      }
+      if (
+        other.cache_creation_ratio_1h != null &&
+        other.cache_creation_ratio_1h !== 0
+      ) {
+        rows.push({
+          label: t('Cache Creation (1h)'),
+          value: `${fmtPrice(baseInputUSD * other.cache_creation_ratio_1h)}/M`,
+        })
+      }
+    }
+
+    if (!tieredSummary) {
+      if (other.audio_ratio != null && other.audio_ratio !== 1) {
+        rows.push({
+          label: t('Audio input'),
+          value: `${fmtPrice(baseInputUSD * other.audio_ratio)}/M`,
+        })
+      }
+
+      if (
+        other.audio_completion_ratio != null &&
+        other.audio_completion_ratio !== 1
+      ) {
+        rows.push({
+          label: t('Audio output'),
+          value: `${fmtPrice(baseInputUSD * other.audio_completion_ratio)}/M`,
+        })
+      }
+
+      if (other.image_ratio != null && other.image_ratio !== 1) {
+        rows.push({
+          label: t('Image input'),
+          value: `${fmtPrice(baseInputUSD * other.image_ratio)}/M`,
+        })
+      }
+    }
+
+    if (other.web_search && other.web_search_call_count) {
       rows.push({
-        label: t('Audio output'),
-        value: `${fmtPrice(baseInputUSD * other.audio_completion_ratio)}/M`,
+        label: t('Web Search'),
+        value: `${other.web_search_call_count}x${other.web_search_price ? ` (${fmtPrice(other.web_search_price)})` : ''}`,
       })
     }
 
-    if (other.image_ratio != null && other.image_ratio !== 1) {
+    if (other.file_search && other.file_search_call_count) {
       rows.push({
-        label: t('Image input'),
-        value: `${fmtPrice(baseInputUSD * other.image_ratio)}/M`,
+        label: t('File Search'),
+        value: `${other.file_search_call_count}x${other.file_search_price ? ` (${fmtPrice(other.file_search_price)})` : ''}`,
       })
     }
-  }
 
-  if (other.web_search && other.web_search_call_count) {
-    rows.push({
-      label: t('Web Search'),
-      value: `${other.web_search_call_count}x${other.web_search_price ? ` (${fmtPrice(other.web_search_price)})` : ''}`,
-    })
-  }
+    if (other.image_generation_call && other.image_generation_call_price) {
+      rows.push({
+        label: t('Image Generation'),
+        value: fmtPrice(other.image_generation_call_price),
+      })
+    }
 
-  if (other.file_search && other.file_search_call_count) {
-    rows.push({
-      label: t('File Search'),
-      value: `${other.file_search_call_count}x${other.file_search_price ? ` (${fmtPrice(other.file_search_price)})` : ''}`,
-    })
-  }
+    if (other.audio_input_seperate_price && other.audio_input_price) {
+      rows.push({
+        label: t('Audio Input Price'),
+        value: fmtPrice(other.audio_input_price),
+      })
+    }
 
-  if (other.image_generation_call && other.image_generation_call_price) {
-    rows.push({
-      label: t('Image Generation'),
-      value: fmtPrice(other.image_generation_call_price),
-    })
-  }
-
-  if (other.audio_input_seperate_price && other.audio_input_price) {
-    rows.push({
-      label: t('Audio Input Price'),
-      value: fmtPrice(other.audio_input_price),
-    })
-  }
-
-  if (isAdmin && other.admin_info) {
-    rows.push({
-      label: t('Billing Source'),
-      value: other.admin_info.local_count_tokens
-        ? t('Local Billing')
-        : t('Upstream Response'),
-    })
+    if (isAdmin && other.admin_info) {
+      rows.push({
+        label: t('Billing Source'),
+        value: other.admin_info.local_count_tokens
+          ? t('Local Billing')
+          : t('Upstream Response'),
+      })
+    }
   }
 
   rows.push({

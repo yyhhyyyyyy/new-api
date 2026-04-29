@@ -23,6 +23,7 @@ import {
   SOURCE_TIME,
   parseTiersFromExpr,
   splitBillingExprAndRequestRules,
+  tierLabelsMatch,
   tryParseRequestRuleExpr,
   type ParsedTier,
   type RequestCondition,
@@ -171,6 +172,12 @@ export function DynamicPricingBreakdown({
 
   const hasTiers = tiers.length > 0
   const hasRules = ruleGroups.length > 0
+  const matchedTierIndex = useMemo(() => {
+    if (!matchedTierLabel) return -1
+    const exactMatch = tiers.findIndex((tier) => tier.label === matchedTierLabel)
+    if (exactMatch >= 0) return exactMatch
+    return tiers.findIndex((tier) => tierLabelsMatch(tier.label, matchedTierLabel))
+  }, [tiers, matchedTierLabel])
 
   if (!expr) return null
 
@@ -241,10 +248,7 @@ export function DynamicPricingBreakdown({
               <TableBody>
                 {tiers.map((tier, i) => {
                   const condSummary = formatConditionSummary(tier.conditions, t)
-                  const isMatched =
-                    matchedTierLabel != null &&
-                    matchedTierLabel !== '' &&
-                    tier.label === matchedTierLabel
+                  const isMatched = i === matchedTierIndex
                   return (
                     <TableRow
                       key={`tier-${i}`}

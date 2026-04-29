@@ -20,6 +20,7 @@ For commercial licensing, please contact support@quantumnous.com
 import i18next from 'i18next';
 import { Modal, Tag, Typography, Avatar } from '@douyinfe/semi-ui';
 import { copy, showSuccess } from './utils';
+import { decodeFromBase64 } from './base64';
 import { MOBILE_BREAKPOINT } from '../hooks/common/useIsMobile';
 import {
   BILLING_PRICING_VARS,
@@ -2221,6 +2222,41 @@ export function renderLogContent(opts) {
   }
 }
 
+const EXPR_STRING_LITERAL_REGEX_SOURCE = '"(?:[^"\\\\]|\\\\.)*"';
+
+function parseExprStringLiteral(raw) {
+  try {
+    const parsed = JSON.parse(raw);
+    return typeof parsed === 'string' ? parsed : null;
+  } catch {
+    return null;
+  }
+}
+
+function normalizeTierLabel(label) {
+  return String(label ?? '')
+    .normalize('NFKC')
+    .replace(/≤/g, '<=')
+    .replace(/≥/g, '>=')
+    .replace(/\s+/gu, '')
+    .toLowerCase();
+}
+
+function tierLabelsMatch(left, right) {
+  if (left == null || right == null) return false;
+  if (left === right) return true;
+  const normalizedLeft = normalizeTierLabel(left);
+  return normalizedLeft !== '' && normalizedLeft === normalizeTierLabel(right);
+}
+
+function resolveMatchedTier(tiers, matchedTier) {
+  if (tiers.length === 0) return null;
+  if (!matchedTier) return null;
+  const exactMatch = tiers.find((tier) => tier.label === matchedTier);
+  if (exactMatch) return exactMatch;
+  return tiers.find((tier) => tierLabelsMatch(tier.label, matchedTier)) || null;
+}
+
 export function stripExprVersion(exprStr) {
   if (!exprStr) return { version: 1, body: '' };
   const m = exprStr.match(/^v(\d+):([\s\S]*)$/);
@@ -2247,11 +2283,13 @@ export function parseTiersFromExpr(exprStr) {
   try {
     const { body } = stripExprVersion(exprStr);
     const condGroup = `((?:(?:p|c|len)\\s*(?:<|<=|>|>=)\\s*[\\d.eE+]+)(?:\\s*&&\\s*(?:p|c|len)\\s*(?:<|<=|>|>=)\\s*[\\d.eE+]+)*)`;
-    const tierRe = new RegExp(`(?:${condGroup}\\s*\\?\\s*)?tier\\("([^"]*)",\\s*([^)]+)\\)`, 'g');
+    const tierRe = new RegExp(`(?:${condGroup}\\s*\\?\\s*)?tier\\((${EXPR_STRING_LITERAL_REGEX_SOURCE}),\\s*([^)]+)\\)`, 'g');
     const tiers = [];
     let m;
     while ((m = tierRe.exec(body)) !== null) {
       const condStr = m[1] || '';
+      const label = parseExprStringLiteral(m[2]);
+      if (label == null) continue;
       const conditions = [];
       if (condStr) {
         for (const cp of condStr.split(/\s*&&\s*/)) {
@@ -2260,7 +2298,7 @@ export function parseTiersFromExpr(exprStr) {
         }
       }
       const tier = parseTierBody(m[3]);
-      tier.label = m[2];
+      tier.label = label;
       tier.conditions = conditions;
       tiers.push(tier);
     }
@@ -2283,13 +2321,18 @@ export function renderTieredModelPrice(opts) {
     cache_creation_tokens_1h: cacheCreationTokens1h = 0,
   } = opts;
   let exprStr = '';
-  try { exprStr = atob(exprB64); } catch { /* ignore */ }
+  try { exprStr = decodeFromBase64(exprB64); } catch { /* ignore */ }
   const tiers = parseTiersFromExpr(exprStr);
   if (tiers.length === 0) {
     return i18next.t('阶梯计费（表达式解析失败）');
   }
 
-  const tier = tiers.find((t) => t.label === matchedTier) || tiers[0];
+  const tier = resolveMatchedTier(tiers, matchedTier);
+  if (!tier) {
+    return renderBillingArticle([
+      buildBillingText('命中档位：{{tier}}', { tier: matchedTier }),
+    ]);
+  }
   const { symbol, rate } = getCurrencyConfig();
   const gr = groupRatio || 1;
 
@@ -2326,9 +2369,9 @@ export function renderTieredModelPriceSimple(opts) {
     outputMode = 'segments',
   } = opts;
   let exprStr = '';
-  try { exprStr = atob(exprB64); } catch { /* ignore */ }
+  try { exprStr = decodeFromBase64(exprB64); } catch { /* ignore */ }
   const tiers = parseTiersFromExpr(exprStr);
-  const tier = tiers.find((t) => t.label === matchedTier) || tiers[0];
+  const tier = resolveMatchedTier(tiers, matchedTier);
 
   if (outputMode === 'segments') {
     const segments = [

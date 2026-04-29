@@ -101,6 +101,16 @@ function buildConditionStr(conditions) {
 }
 
 const CACHE_VAR_MAP = BILLING_CACHE_VAR_MAP;
+const EXPR_STRING_LITERAL_REGEX_SOURCE = '"(?:[^"\\\\]|\\\\.)*"';
+
+function parseExprStringLiteral(raw) {
+  try {
+    const parsed = JSON.parse(raw);
+    return typeof parsed === 'string' ? parsed : null;
+  } catch {
+    return null;
+  }
+}
 
 function getTierCacheMode(tier) {
   if (tier?.cache_mode === CACHE_MODE_TIMED) {
@@ -159,6 +169,10 @@ function buildTierBodyExpr(tier) {
   return parts.join(' + ');
 }
 
+function buildTierExpr(label, tier) {
+  return `tier(${JSON.stringify(label)}, ${buildTierBodyExpr(tier)})`;
+}
+
 function generateExprFromVisualConfig(config) {
   if (!config || !config.tiers || config.tiers.length === 0)
     return 'p * 0 + c * 0';
@@ -167,7 +181,7 @@ function generateExprFromVisualConfig(config) {
   if (tiers.length === 1) {
     const t = tiers[0];
     const label = t.label || 'default';
-    const body = `tier("${label}", ${buildTierBodyExpr(t)})`;
+    const body = buildTierExpr(label, t);
     const cond = buildConditionStr(t.conditions);
     if (cond) {
       return `${cond} ? ${body} : p * 0 + c * 0`;
@@ -179,7 +193,7 @@ function generateExprFromVisualConfig(config) {
   for (let i = 0; i < tiers.length; i++) {
     const t = tiers[i];
     const label = t.label || `第${i + 1}档`;
-    const body = `tier("${label}", ${buildTierBodyExpr(t)})`;
+    const body = buildTierExpr(label, t);
     const cond = buildConditionStr(t.conditions);
 
     if (i < tiers.length - 1 && cond) {
@@ -209,14 +223,17 @@ function tryParseVisualConfig(exprStr) {
     const bodyPat = `p\\s*\\*\\s*([\\d.eE+-]+)\\s*\\+\\s*c\\s*\\*\\s*([\\d.eE+-]+)${optCacheStr}`;
 
     // Single-tier: tier("label", body)
-    const singleRe = new RegExp(`^tier\\("([^"]*)",\\s*${bodyPat}\\)$`);
+    const labelPat = `(${EXPR_STRING_LITERAL_REGEX_SOURCE})`;
+    const singleRe = new RegExp(`^tier\\(${labelPat},\\s*${bodyPat}\\)$`);
     const simple = exprStr.match(singleRe);
     if (simple) {
+      const label = parseExprStringLiteral(simple[1]);
+      if (label == null) return null;
       const tier = {
         conditions: [],
         input_unit_cost: Number(simple[2]),
         output_unit_cost: Number(simple[3]),
-        label: simple[1],
+        label,
       };
       CACHE_VAR_MAP.forEach((cv, i) => {
         const val = simple[4 + i];
@@ -228,13 +245,15 @@ function tryParseVisualConfig(exprStr) {
     // Multi-tier: cond1 ? tier(body) : cond2 ? tier(body) : tier(body)
     const condGroup = `((?:(?:p|c|len)\\s*(?:<|<=|>|>=)\\s*[\\d.eE+]+)(?:\\s*&&\\s*(?:p|c|len)\\s*(?:<|<=|>|>=)\\s*[\\d.eE+]+)*)`;
     const tierRe = new RegExp(
-      `(?:${condGroup}\\s*\\?\\s*)?tier\\("([^"]*)",\\s*${bodyPat}\\)`,
+      `(?:${condGroup}\\s*\\?\\s*)?tier\\(${labelPat},\\s*${bodyPat}\\)`,
       'g',
     );
     const tiers = [];
     let match;
     while ((match = tierRe.exec(exprStr)) !== null) {
       const condStr = match[1] || '';
+      const label = parseExprStringLiteral(match[2]);
+      if (label == null) return null;
       const conditions = [];
       if (condStr) {
         const condParts = condStr.split(/\s*&&\s*/);
@@ -249,7 +268,7 @@ function tryParseVisualConfig(exprStr) {
         conditions,
         input_unit_cost: Number(match[3]),
         output_unit_cost: Number(match[4]),
-        label: match[2],
+        label,
       };
       CACHE_VAR_MAP.forEach((cv, i) => {
         const val = match[5 + i];

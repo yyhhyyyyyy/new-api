@@ -185,6 +185,7 @@ export const COMMON_TIMEZONES: { value: string; label: string }[] = [
 ]
 
 const NUMERIC_LITERAL_REGEX = /^-?(?:\d+\.?\d*|\.\d+)(?:[eE][+-]?\d+)?$/
+export const EXPR_STRING_LITERAL_REGEX_SOURCE = '"(?:[^"\\\\]|\\\\.)*"'
 
 export type ParamHeaderCondition = {
   source: 'param' | 'header'
@@ -233,6 +234,34 @@ function stripExprVersion(exprStr: string): { version: number; body: string } {
   return { version: 1, body: exprStr }
 }
 
+export function parseExprStringLiteral(raw: string): string | null {
+  try {
+    const parsed = JSON.parse(raw) as unknown
+    return typeof parsed === 'string' ? parsed : null
+  } catch {
+    return null
+  }
+}
+
+export function normalizeTierLabel(label: string | null | undefined): string {
+  return String(label ?? '')
+    .normalize('NFKC')
+    .replace(/≤/g, '<=')
+    .replace(/≥/g, '>=')
+    .replace(/\s+/gu, '')
+    .toLowerCase()
+}
+
+export function tierLabelsMatch(
+  left: string | null | undefined,
+  right: string | null | undefined
+): boolean {
+  if (left == null || right == null) return false
+  if (left === right) return true
+  const normalizedLeft = normalizeTierLabel(left)
+  return normalizedLeft !== '' && normalizedLeft === normalizeTierLabel(right)
+}
+
 function parseTierBody(bodyStr: string): Record<string, number> {
   const coeffs: Record<string, number> = {}
   const re = new RegExp(BILLING_VAR_REGEX.source, 'g')
@@ -255,13 +284,15 @@ export function parseTiersFromExpr(exprStr: string): ParsedTier[] {
       `((?:(?:p|c|len)\\s*(?:<|<=|>|>=)\\s*[\\d.eE+]+)` +
       `(?:\\s*&&\\s*(?:p|c|len)\\s*(?:<|<=|>|>=)\\s*[\\d.eE+]+)*)`
     const tierRe = new RegExp(
-      `(?:${condGroup}\\s*\\?\\s*)?tier\\("([^"]*)",\\s*([^)]+)\\)`,
+      `(?:${condGroup}\\s*\\?\\s*)?tier\\((${EXPR_STRING_LITERAL_REGEX_SOURCE}),\\s*([^)]+)\\)`,
       'g'
     )
     const tiers: ParsedTier[] = []
     let m
     while ((m = tierRe.exec(body)) !== null) {
       const condStr = m[1] || ''
+      const label = parseExprStringLiteral(m[2])
+      if (label == null) continue
       const conditions: TierCondition[] = []
       if (condStr) {
         for (const cp of condStr.split(/\s*&&\s*/)) {
@@ -276,7 +307,7 @@ export function parseTiersFromExpr(exprStr: string): ParsedTier[] {
         }
       }
       const tier = parseTierBody(m[3]) as ParsedTier
-      tier.label = m[2]
+      tier.label = label
       tier.conditions = conditions
       tiers.push(tier)
     }

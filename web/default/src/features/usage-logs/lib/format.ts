@@ -2,6 +2,7 @@ import type { StatusBadgeProps } from '@/components/status-badge'
 import {
   BILLING_PRICING_VARS,
   parseTiersFromExpr,
+  tierLabelsMatch,
   type ParsedTier,
 } from '@/features/pricing/lib/billing-expr'
 import type { UsageLog } from '../data/schema'
@@ -157,7 +158,16 @@ export function formatModelName(log: UsageLog): {
 export function decodeBillingExprB64(exprB64: string | undefined): string {
   if (!exprB64) return ''
   try {
-    return atob(exprB64)
+    const binary = atob(exprB64)
+    const bytes = Uint8Array.from(binary, (char) => char.charCodeAt(0))
+    if (typeof TextDecoder !== 'undefined') {
+      return new TextDecoder('utf-8').decode(bytes)
+    }
+    return decodeURIComponent(
+      Array.from(bytes, (byte) => `%${byte.toString(16).padStart(2, '0')}`).join(
+        ''
+      )
+    )
   } catch {
     return ''
   }
@@ -165,19 +175,18 @@ export function decodeBillingExprB64(exprB64: string | undefined): string {
 
 /**
  * Resolve which parsed tier corresponds to the matched_tier label in a log
- * entry. Falls back to the first tier when the label is missing or unknown,
- * which mirrors the behaviour of the classic frontend renderer.
+ * entry. Missing or unknown labels do not fall back to another tier because
+ * that would display guessed unit prices.
  */
 export function resolveMatchedTier(
   tiers: ParsedTier[],
   matchedLabel: string | undefined
 ): ParsedTier | null {
   if (tiers.length === 0) return null
-  if (matchedLabel) {
-    const found = tiers.find((tier) => tier.label === matchedLabel)
-    if (found) return found
-  }
-  return tiers[0]
+  if (!matchedLabel) return null
+  const exactMatch = tiers.find((tier) => tier.label === matchedLabel)
+  if (exactMatch) return exactMatch
+  return tiers.find((tier) => tierLabelsMatch(tier.label, matchedLabel)) || null
 }
 
 /**

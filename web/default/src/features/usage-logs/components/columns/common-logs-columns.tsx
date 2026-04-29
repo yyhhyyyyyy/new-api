@@ -163,6 +163,10 @@ function buildDetailSegments(
         muted: true,
       })
     }
+  } else if (other.billing_mode === 'tiered_expr') {
+    segments.push({
+      text: t('Dynamic Pricing'),
+    })
   } else {
     const isPerCall = isPerCallBilling(other.model_price)
     if (isPerCall) {

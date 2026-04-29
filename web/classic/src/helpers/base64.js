@@ -34,6 +34,19 @@ const toBinaryString = (text) => {
   );
 };
 
+const fromBinaryString = (binary) => {
+  if (typeof TextDecoder !== 'undefined') {
+    const bytes = Uint8Array.from(binary, (char) => char.charCodeAt(0));
+    return new TextDecoder('utf-8').decode(bytes);
+  }
+
+  return decodeURIComponent(
+    Array.from(binary, (char) =>
+      `%${char.charCodeAt(0).toString(16).padStart(2, '0')}`,
+    ).join(''),
+  );
+};
+
 export const encodeToBase64 = (value) => {
   const input = value == null ? '' : String(value);
 
@@ -53,4 +66,25 @@ export const encodeToBase64 = (value) => {
   }
 
   return window.btoa(toBinaryString(input));
+};
+
+export const decodeFromBase64 = (value) => {
+  const input = value == null ? '' : String(value);
+
+  if (typeof window === 'undefined') {
+    if (typeof Buffer !== 'undefined') {
+      return Buffer.from(input, 'base64').toString('utf-8');
+    }
+    if (
+      typeof globalThis !== 'undefined' &&
+      typeof globalThis.atob === 'function'
+    ) {
+      return fromBinaryString(globalThis.atob(input));
+    }
+    throw new Error(
+      'Base64 decoding is unavailable in the current environment',
+    );
+  }
+
+  return fromBinaryString(window.atob(input));
 };

@@ -1,4 +1,8 @@
-import { BILLING_CACHE_VAR_MAP } from './billing-expr'
+import {
+  BILLING_CACHE_VAR_MAP,
+  EXPR_STRING_LITERAL_REGEX_SOURCE,
+  parseExprStringLiteral,
+} from './billing-expr'
 
 export const CACHE_MODE_TIMED = 'timed'
 export const CACHE_MODE_GENERIC = 'generic'
@@ -107,6 +111,10 @@ function buildTierBodyExpr(tier: VisualTier): string {
   return parts.join(' + ')
 }
 
+function buildTierExpr(label: string, tier: VisualTier): string {
+  return `tier(${JSON.stringify(label)}, ${buildTierBodyExpr(tier)})`
+}
+
 export function generateExprFromVisualConfig(
   config: VisualConfig | null | undefined
 ): string {
@@ -118,7 +126,7 @@ export function generateExprFromVisualConfig(
   if (tiers.length === 1) {
     const tier = tiers[0]
     const label = tier.label || 'default'
-    const body = `tier("${label}", ${buildTierBodyExpr(tier)})`
+    const body = buildTierExpr(label, tier)
     const cond = buildConditionStr(tier.conditions)
     if (cond) {
       return `${cond} ? ${body} : p * 0 + c * 0`
@@ -130,7 +138,7 @@ export function generateExprFromVisualConfig(
   for (let i = 0; i < tiers.length; i++) {
     const tier = tiers[i]
     const label = tier.label || `tier_${i + 1}`
-    const body = `tier("${label}", ${buildTierBodyExpr(tier)})`
+    const body = buildTierExpr(label, tier)
     const cond = buildConditionStr(tier.conditions)
 
     if (i < tiers.length - 1 && cond) {
@@ -157,14 +165,17 @@ export function tryParseVisualConfig(
 
     const bodyPat = `p\\s*\\*\\s*([\\d.eE+-]+)\\s*\\+\\s*c\\s*\\*\\s*([\\d.eE+-]+)${optCacheStr}`
 
-    const singleRe = new RegExp(`^tier\\("([^"]*)",\\s*${bodyPat}\\)$`)
+    const labelPat = `(${EXPR_STRING_LITERAL_REGEX_SOURCE})`
+    const singleRe = new RegExp(`^tier\\(${labelPat},\\s*${bodyPat}\\)$`)
     const simple = body.match(singleRe)
     if (simple) {
+      const label = parseExprStringLiteral(simple[1])
+      if (label == null) return null
       const tier: Record<string, unknown> = {
         conditions: [],
         input_unit_cost: Number(simple[2]),
         output_unit_cost: Number(simple[3]),
-        label: simple[1],
+        label,
       }
       BILLING_CACHE_VAR_MAP.forEach((cv, i) => {
         const val = simple[4 + i]
@@ -179,13 +190,15 @@ export function tryParseVisualConfig(
       `((?:(?:p|c|len)\\s*(?:<|<=|>|>=)\\s*[\\d.eE+]+)` +
       `(?:\\s*&&\\s*(?:p|c|len)\\s*(?:<|<=|>|>=)\\s*[\\d.eE+]+)*)`
     const tierRe = new RegExp(
-      `(?:${condGroup}\\s*\\?\\s*)?tier\\("([^"]*)",\\s*${bodyPat}\\)`,
+      `(?:${condGroup}\\s*\\?\\s*)?tier\\(${labelPat},\\s*${bodyPat}\\)`,
       'g'
     )
     const tiers: VisualTier[] = []
     let match: RegExpExecArray | null
     while ((match = tierRe.exec(body)) !== null) {
       const condStr = match[1] || ''
+      const label = parseExprStringLiteral(match[2])
+      if (label == null) return null
       const conditions: TierConditionInput[] = []
       if (condStr) {
         for (const cp of condStr.split(/\s*&&\s*/)) {
@@ -203,7 +216,7 @@ export function tryParseVisualConfig(
         conditions,
         input_unit_cost: Number(match[3]),
         output_unit_cost: Number(match[4]),
-        label: match[2],
+        label,
       }
       const m = match
       BILLING_CACHE_VAR_MAP.forEach((cv, i) => {
